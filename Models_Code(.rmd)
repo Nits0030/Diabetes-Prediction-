@@ -1,0 +1,405 @@
+---
+title: "R Notebook- Diabetes Analysis"
+Author : 'Nikki Sharma'
+output: 
+  html_notebook:
+    theme: readable
+---
+
+
+# Predicting Diabetes {.tabset .tabset-fade .tabset-pills}
+
+## Diabetes Data Analysis 
+
+### Code Overview -
+1. Decision tree 
+2. Logistic Regression 
+3. Naive Bayes 
+4. Cluster Analysis 
+5. Random Forest
+
+### Load Libraries
+```{r}
+library(ggplot2)
+library(dplyr)
+library(gridExtra)
+library(corrplot)
+library(ggplot2)
+library(rpart)
+library(rpart.plot)
+library(caret)
+library(rattle)
+library(ROCR)
+library(class)
+```
+
+### Look at the structure and the first few rows.
+
+```{r}
+diabetes <- read.csv('diabetes.csv')
+dim(diabetes)
+str(diabetes)
+head(diabetes)
+```
+
+### Exploratory Data Analysis and Feature Selection
+
+```{r}
+#Visual 1
+library(ggplot2)
+ggplot(data, aes(Age, colour = Outcome)) +
+geom_freqpoly(binwidth = 1) + labs(title="Age Distribution by Outcome")
+
+
+#visual 2
+ggplot(data, aes(Glucose, colour = Outcome)) +
+geom_freqpoly(binwidth = 1) + labs(title="Glucose Distribution by Outcome")
+
+```
+### Check missing values 
+
+```{r}
+cat("Number of missing value:", sum(is.na(diabetes)), "\n")
+```
+
+### Statistical summary 
+
+```{r}
+summary(diabetes)
+```
+### Use Mice if missing values to be filled 
+```{r}
+library(Amelia)
+missmap(diabetes)
+```
+
+
+```{r}
+diabetes$Outcome <- factor(diabetes$Outcome)
+```
+
+### Histogram of numeric variables
+
+```{r}
+p1 <- ggplot(diabetes, aes(x=Pregnancies)) + ggtitle("Number of times pregnant") +
+  geom_histogram(aes(y = 100*(..count..)/sum(..count..)), binwidth = 1, colour="black", fill="white") + ylab("Percentage")
+p2 <- ggplot(diabetes, aes(x=Glucose)) + ggtitle("Glucose") +
+  geom_histogram(aes(y = 100*(..count..)/sum(..count..)), binwidth = 5, colour="black", fill="white") + ylab("Percentage")
+p3 <- ggplot(diabetes, aes(x=BloodPressure)) + ggtitle("Blood Pressure") +
+  geom_histogram(aes(y = 100*(..count..)/sum(..count..)), binwidth = 2, colour="black", fill="white") + ylab("Percentage")
+p4 <- ggplot(diabetes, aes(x=SkinThickness)) + ggtitle("Skin Thickness") +
+  geom_histogram(aes(y = 100*(..count..)/sum(..count..)), binwidth = 2, colour="black", fill="white") + ylab("Percentage")
+p5 <- ggplot(diabetes, aes(x=Insulin)) + ggtitle("Insulin") +
+  geom_histogram(aes(y = 100*(..count..)/sum(..count..)), binwidth = 20, colour="black", fill="white") + ylab("Percentage")
+p6 <- ggplot(diabetes, aes(x=BMI)) + ggtitle("Body Mass Index") +
+  geom_histogram(aes(y = 100*(..count..)/sum(..count..)), binwidth = 1, colour="black", fill="white") + ylab("Percentage")
+p7 <- ggplot(diabetes, aes(x=DiabetesPedigreeFunction)) + ggtitle("Diabetes Pedigree Function") +
+  geom_histogram(aes(y = 100*(..count..)/sum(..count..)), colour="black", fill="white") + ylab("Percentage")
+p8 <- ggplot(diabetes, aes(x=Age)) + ggtitle("Age") +
+  geom_histogram(aes(y = 100*(..count..)/sum(..count..)), binwidth=1, colour="black", fill="white") + ylab("Percentage")
+grid.arrange(p1, p2, p3, p4, p5, p6, p7, p8, ncol=2)
+```
+
+### All the variables have reasonable broad distribution, therefore, will be kept for the regression analysis. 
+
+### Correlation Between Numeric Varibales
+
+```{r}
+numeric.var <- sapply(diabetes, is.numeric)
+corr.matrix <- cor(diabetes[,numeric.var])
+corrplot(corr.matrix, main="\n\nCorrelation Plot for Numerical Variables", order = "hclust", tl.col = "black", tl.srt=45, tl.cex=0.5, cl.cex=0.5)
+
+library(psych)
+pairs.panels(diabetes)
+```
+
+### The numeric variabls and the correlation correlated. 
+
+### Correlation bewteen numeric variables and outcome. 
+
+```{r}
+attach(diabetes)
+par(mfrow=c(2,4))
+boxplot(Pregnancies~Outcome, main="No. of Pregnancies vs. Diabetes",col = "red", 
+        xlab="Outcome", ylab="Pregnancies")
+boxplot(Glucose~Outcome, main="Glucose vs. Diabetes", col = "pink",
+        xlab="Outcome", ylab="Glucose")
+boxplot(BloodPressure~Outcome, main="Blood Pressure vs. Diabetes",col = "red", 
+        xlab="Outcome", ylab="Blood Pressure")
+boxplot(SkinThickness~Outcome, main="Skin Thickness vs. Diabetes", col = "pink",
+        xlab="Outcome", ylab="Skin Thickness")
+boxplot(Insulin~Outcome, main="Insulin vs. Diabetes", col = "red",
+        xlab="Outcome", ylab="Insulin")
+boxplot(BMI~Outcome, main="BMI vs. Diabetes", col = "pink",
+        xlab="Outcome", ylab="BMI")
+boxplot(DiabetesPedigreeFunction~Outcome, main="Diabetes Pedigree Function vs. Diabetes", xlab="Outcome",col = "red", ylab="DiabetesPedigreeFunction")
+boxplot(Age~Outcome, main="Age vs. Diabetes", col = "pink",
+        xlab="Outcome", ylab="Age")
+```
+
+### Blood pressure and skin thickness show little variation with diabetes, they will be excluded from the model. Other variables show more or less correlation with diabetes, so will be kept.
+
+
+
+### Read the csv file into R
+```{r}
+diab<- read.csv("diabetes.csv")
+str(diab)
+diab$Outcome<-factor(diab$Outcome, levels=c(0,1), labels=c("No", "Yes"))
+```
+
+
+### Data partitioning
+```{r}
+set.seed(8)
+index<-createDataPartition(diab$Outcome, p=0.8, list=FALSE)
+train<-diab[index,]
+test<-diab[-index,]
+```
+
+## 1.DECISION TREE 
+```{r}
+set.seed(8)
+model_dt<-rpart(Outcome~., data=Train)
+rpart.plot(model_dt)
+rpart.rules(model_dt)
+model_dt$models <- paste("DT_model")
+
+# Tree plot
+plot(model_dt, uniform=TRUE, 
+  	main="Classification Tree for Diabetes")
+text(model_dt, use.n=TRUE, all=TRUE, cex=.8)
+
+#PREDICT
+dtPredict <- predict(model_dt,test, type = "class")
+
+# Confusion Matrix
+table(test$Outcome,dtPredict , dnn = c("Actual","Predicted"))
+
+# Output the result
+dd<- data.frame(Actual = test$Outcome,Predicted = dtPredict) 
+dd
+
+```
+
+
+```{r}
+rpart.rules(model_dt)
+```
+### Rule #last  has the largest cover,So if Glucose<127.5 and age is more than 28.5 the person is not going to be diagnosed with diabetes with a probability of 0.92.
+
+```{r}
+pred1<-predict(model_dt, Test, type="class" )
+confusionMatrix(pred1, reference = Test$Outcome, positive="Yes")
+```
+### Accuraccy of the model is 0.82, which seems a fair measure, however, p-value is a large number, and this means that the model is  performing  well.  Sensitivity of 0.764 indicated that only 76% of people with diabetes were predicted to be sick, and specificity of 0.86 indicates that 86% of people who were not sick, were correctly predicted to be so. 
+
+### ROC curve for Rpart
+```{r}
+pred1_prob<-predict(model_dt, Test)
+prediction1<-prediction(pred1_prob[,2],Test$Outcome )
+perf1<-performance(prediction1, "tpr", "fpr")
+plot(perf1, colorize=TRUE)
+performance(prediction1, "auc")@y.values
+```
+```{r}
+performance(prediction1, "auc")@y.values
+```
+### Area under the curve is  0.846, which is not much more than 0.5 of no information rate.
+
+
+
+## 2.LOGISTIC REGRESSION
+
+```{r}
+library(caTools)
+set.seed(123)
+sample= sample.split(data$Outcome,SplitRatio = 0.80)
+train = subset(data,sample == TRUE)
+test = subset(data,sample == FALSE)
+```
+
+```{r}
+nrow(data)
+nrow(train)
+nrow(test)
+```
+
+### Model Fitting 
+```{r}
+modelglm<- glm(Outcome ~ . , data= train, family = binomial)
+summary(modelglm)
+```
+
+### Predicting Outcome 
+```{r}
+Predict <- predict(modelglm, type = "response")
+tapply(Predict,train$Outcome,mean)
+```
+
+
+### The ROC curve that stands for Receiver Operating Characteristic (ROC) is a curve that is used to assess the accuracy of a continuous measurement for predicting a binary outcome. It generally shows the performance of a classification model at all classification thresholds.
+
+```{r}
+library(ROCR)
+# Generate ROC CURVE
+ROC_pred <- prediction(Predict,train$Outcome)
+ROC_perf <- performance(ROC_pred,"tpr","fpr")
+
+# Adding Threshold
+plot(ROC_perf, colorize = TRUE , print.cutoffs.at=seq(0,1,0.1),text.adj=c(-0.2,1.7))
+abline(a = 0, b = 1)
+```
+
+
+### Generate AUC Curve
+```{r}
+library(ggplot2)
+auc_train <-round(as.numeric(performance(ROC_pred,"auc")@y.values),2)
+auc_train
+# legend(.8,.2,auc_train,title = "AUC",cex = 1)
+```
+
+### MAKING PREDICTION ON TEST DATA 
+```{r}
+# Making prediction on test data 
+Pred_Test<-predict(modelglm, type = "response",newdata = test)
+# Convert probablities to values using below
+### Based on ROC curve above, selected a threshold of 0.5
+test_tab<- table (test$Outcome,Pred_Test>0.5)
+test_tab
+```
+
+
+### Accuracy 
+```{r}
+accuracy_test <- round(sum(diag(test_tab))/sum(test_tab),2)
+cat("Accuracy on test set is ",accuracy_test )
+```
+### ROC Curve
+```{r}
+ROCPredTest = prediction(Pred_Test,test$Outcome)
+
+ROC_perf2 <- performance(ROCPredTest,"tpr","fpr")
+plot(ROC_perf,colorize = TRUE,print.cutoffs.at=seq(0,1,0.1),text.adj=c(-0.2,1.7))
+abline(a = 0, b =1)
+```
+### AUC rate 
+```{r}
+auc_test<-round(as.numeric(performance(ROCPredTest,"auc")@y.values),2)
+#legend(.8,2,auc_train,title = "AUC2",cex = 1)
+```
+
+```{r}
+auc = round(as.numeric(performance(ROCPredTest,"auc")@y.values),2)
+auc
+```
+
+
+## 3.NAIVE BAYES 
+
+### set seed 
+```{r}
+set.seed(7267166)
+trainIndex=createDataPartition(data$Outcome, p=0.75)$Resample1
+train= data[trainIndex, ]
+test= data[-trainIndex, ]
+```
+### Print the table 
+```{r}
+print(table(data$Outcome))
+print(table(train$Outcome))
+print(table(test$Outcome))
+```
+
+
+
+### Naive Bayes Model 
+```{r}
+library(e1071)
+NBclassfier=naiveBayes(Outcome ~., data=train)
+print(NBclassfier)
+
+```
+### Print contingency table 
+```{r}
+printALL=function(model)
+  {
+  trainPred=predict(model, newdata = train, type = "class")
+  trainTable=table(train$Outcome, trainPred)
+  testPred=predict(NBclassfier, newdata=test, type="class")
+  testTable=table(test$Outcome, testPred)
+  trainAcc=(trainTable[1,1]+trainTable[2,2])/sum(trainTable)
+  testAcc=(testTable[1,1]+testTable[2,2])/sum(testTable)
+  message("Contingency Table for Training Data")
+  print(trainTable)
+  message("Contingency Table for Test Data")
+  print(testTable)
+  message("Accuracy")
+  print(round(cbind(trainAccuracy=trainAcc, testAccuracy=testAcc),3))
+}
+printALL(NBclassfier)
+```
+
+
+
+## 4.CLUSTER ANALYSIS 
+### Cluster analysis based on Age group 
+```{r}
+library(cluster)    # clustering algorithms
+library(factoextra) # clustering algorithms & visualization
+set.seed(20)
+data <- diab
+df <- scale(data[,-9])
+k2 <- kmeans(df, centers = 3, nstart = 25)
+fviz_cluster(k2, data = df,xlab = "")
+```
+
+### Optimal number of clusters , # Optimal K = 3
+
+```{r}
+set.seed(123)
+fviz_nbclust(df, kmeans, method = "wss")
+```
+
+
+## 5. RANDOM FOREST
+```{r}
+str(data)
+data$Outcome = as.factor(data$Outcome)
+```
+
+### spliting the dataset
+```{r}
+ind = sample(2, nrow(data), replace=TRUE)
+train = data[ind==2,]
+test = data[ind==1,]
+```
+
+### building the classifier
+```{r}
+library(randomForest)
+classifier = randomForest(Outcome~., data = train)
+classifier
+```
+
+### making prediction
+```{r}
+pred = predict(classifier, newdata = test, type = "response")
+```
+
+### confusion matrix
+```{r}
+tb = table(pred, test$Outcome)
+tb
+```
+### Accuracy resulted in 91% , which means 91 % rate of predicting diabetes in a patient
+```{r}
+library(caret)
+confusionMatrix(tb)
+```
+### Variable Importance 
+```{r}
+# the most important variable
+varImpPlot(classifier)
+```
