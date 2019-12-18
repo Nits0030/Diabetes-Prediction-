@@ -1,0 +1,441 @@
+---
+title: "R Notebook"
+Author : 'Nikki Sharma'
+output: 
+  html_notebook:
+    theme: readable
+---
+
+# ReSampling Methods
+
+## Diabetes Data Analysis 
+### for Polynomial Regression with multiple variables 
+
+
+
+### Code Overview -
+1. Read the data and drop the duplicates
+2. Build the correlation matrix and identify the high correlated attributes
+3. Build individual regression model to determine the linear/non-linear
+   relationship with the outcome variable
+4. Aggregate the individual models into final model
+5. Graph/Plot 1- Validation Set Approach
+6. Graph/Plot 2- LOOCV & K-Fold Cross Validation Approach
+7. ANOVA Test for the degree  
+
+
+### Import Libraries
+
+```{r}
+library(readr)
+library(corrplot)
+library(PerformanceAnalytics)
+library(caret)
+library(mlbench)
+library(tibble)
+library(ggplot2)
+library(plotly)
+```
+
+
+### Read the data and drop the duplicates
+```{r}
+setwd("D:/STU/6.1 -Applied ML/Project")
+diabetes <- read_csv("diabetes.csv")
+#View(diabetes)
+print(table(diabetes$Outcome))
+
+diab_removedup <- unique(diabetes)
+print(table(diab_removedup$Outcome))
+```
+
+
+## CORRELATION MODEL
+### Build the correlation matrix and identify the high correlated attributes
+
+```{r}
+# calculate correlation matrix
+correlationMatrix <- cor(diab_removedup)
+
+library(psych)
+pairs.panels(diab_removedup)
+
+# summarize the correlation matrix
+corrplot(correlationMatrix, type = "upper", method = "shade", order = "alphabet",
+         tl.col = "black", tl.srt = 90)
+# find attributes that are highly corrected 
+highlyCorrelated <- findCorrelation(correlationMatrix, cutoff=0.25)
+
+# print indexes of highly correlated attributes
+print(highlyCorrelated)
+
+```
+#### Correlation Results Interpretation - 
+#### The plot above shows a significant correlation between glucose, insulin, age, pregnancy, BMI with the Outcome variable.
+
+## Regression Model
+### Build individual regression model to determine the linear/non-linear  relationship with the outcome variable
+
+### Attribute: Glucose
+```{r}
+# Glucose 
+# Removing Outliers
+diab_outliers <- subset(diab_removedup,diab_removedup$Glucose>60)
+plot(diab_outliers$Outcome ~ diab_outliers$Glucose, xlab = "Glucose", ylab = "Outcome")
+lines(lowess(diab_outliers$Outcome ~ diab_outliers$Glucose))
+
+# Build Model
+model_glucose <- lm(diab_outliers$Outcome ~  diab_outliers$Glucose , data = diab_outliers)
+lines(diab_outliers$Glucose,predict(model_glucose),col = 3)
+```
+#### Plot Interpretation -
+#### This shows that Glucose possess a very closure to linear relationship with the Outcome variable after fitting a linear model.
+
+
+
+
+### Attribute: Pregnancy
+```{r}
+# Pregnancy
+plot(diab_outliers$Outcome ~ diab_outliers$Pregnancies,xlab = "Pregnancy", ylab = "Outcome")
+lines(lowess(diab_outliers$Outcome ~ diab_outliers$Pregnancies))
+# Build Model
+model_preg <- lm(diab_outliers$Outcome ~ diab_outliers$Pregnancies , data = diab_outliers)
+lines(diab_outliers$Pregnancies,predict(model_preg),col = 3)
+```
+#### Plot Interpretation -
+#### This shows that Pregnancy possess a very closure to linear relationship with the Outcome variable after fitting a linear model.
+
+### Attribute: Insulin
+```{r}
+# Insulin
+plot(diab_outliers$Outcome ~ diab_outliers$Insulin,xlab = "Insulin", ylab = "Outcome")
+lines(lowess(diab_outliers$Outcome ~ diab_outliers$Insulin))
+# Build Model
+model_Insulin <- lm(diab_outliers$Outcome ~ diab_outliers$Insulin + sinpi(diab_outliers$Insulin), data = diab_outliers)
+lines(diab_outliers$Insulin,predict(model_Insulin),col = 3)
+
+```
+#### Plot Interpretation -
+#### This shows that Insulin attribute possess a non-linear relationship (Polynomial) with the Outcome variable after fitting a linear model
+
+
+### Attribute: BMI
+```{r}
+# BMI
+# Remove Outliers
+diab_outliers <- (subset(diab_outliers,diab_outliers$BMI>20))
+plot(diab_outliers$Outcome ~ diab_outliers$BMI,xlab = "BMI", ylab = "Outcome")
+lines(lowess(diab_outliers$Outcome ~ diab_outliers$BMI))
+# Build Model
+model_BMI <- lm(diab_outliers$Outcome ~ 1 + diab_outliers$BMI , data = diab_outliers)
+lines(diab_outliers$BMI,predict(model_BMI),col = 3)
+```
+#### Plot Interpretation -
+#### This shows that BMI attribute possess a non-linear relationship (Polynomial) with the Outcome variable after fitting a linear model.
+
+
+
+
+### Attribute: Age
+```{r}
+# Age
+plot(diab_outliers$Outcome ~ diab_outliers$Age, xlab = "Glucose", ylab = "Outcome")
+lines(lowess(diab_outliers$Outcome ~ diab_outliers$Age))
+# Build Model
+model_Age <- lm(diab_outliers$Outcome ~ diab_outliers$Age , data = diab_outliers)
+lines(diab_outliers$Age,predict(model_Age),col = 3)
+```
+#### Plot Interpretation -
+#### This shows that Age attribute possess a non-linear relationship (Polynomial) with the Outcome variable after fitting a linear model.
+
+
+## AGGREGATE MODEL 
+### Aggregate the individual models into final model
+
+```{r}
+model_final <- lm(diab_outliers$Outcome ~ 
+                    diab_outliers$Glucose 
+                  + diab_outliers$Pregnancies
+                  + diab_outliers$Insulin
+                  + I(diab_outliers$Pregnancies^0.5) 
+                  + diab_outliers$BMI 
+                  + I(diab_outliers$BMI^-2)
+                  + diab_outliers$Age
+                  + I(diab_outliers$Age^2), data = diab_outliers)
+summary(model_final)
+```
+
+
+## VALIDATION SET APPROACH
+
+```{r, fig.width= 10}
+# MSE Plots - Validation approach 
+# Single set 
+set.seed(7212)
+sample <- sample(c(TRUE, FALSE), nrow(diab_outliers), replace = T, prob = c(0.6,0.4))
+train <- diab_outliers[sample, ]
+test <- diab_outliers[!sample, ]
+
+
+
+# loop for first ten polynomial
+mse.df <- tibble(Degree_of_Polynomial = 1:10, Mean_Squared_Error = NA)
+for(i in 1:10) {
+  lm.fit <- lm(Outcome ~ Glucose 
+               + Pregnancies
+               + Insulin
+               + BMI 
+               + poly(BMI,i)
+               + Age
+               + poly(Age,i), data = train)
+  mse.df[i, 2] <- mean((test$Outcome - predict(lm.fit, test))^2)
+}
+print(mse.df)
+
+# Plot- Single set
+p_1 <- mse.df %>%
+  ggplot( aes(Degree_of_Polynomial, Mean_Squared_Error))+
+  geom_point() +
+  geom_line()+xlab("Degree_of_Polynomial") + ylab("Mean_Squared_Error")+
+  theme_bw()
+
+# Multi set
+mse.df.2 <- tibble(sample = vector("integer", 100), 
+                   Degree_of_Polynomial = vector("integer", 100), 
+                   Mean_Squared_Error = vector("double", 100))
+counter <- 1
+for(i in 1:10) {
+  # random sample
+  set.seed(i)
+  sample <- sample(c(TRUE, FALSE), nrow(diab_outliers), replace = T, prob = c(0.6,0.4))
+  train <- diab_outliers[sample, ]
+  test <- diab_outliers[!sample, ]
+  
+  # modeling
+  for(j in 1:10) {
+    lm.fit <- lm(Outcome ~ 
+                   Glucose 
+                 + Pregnancies
+                 + Insulin
+                 + poly(Pregnancies,j) 
+                 + BMI 
+                 + poly(BMI,j)
+                 + Age
+                 + poly(Age,j), data = train)
+    
+    # add degree & mse values
+    mse.df.2[counter, 2] <- j
+    mse.df.2[counter, 3] <- mean((test$Outcome - predict(lm.fit, test))^2)
+    
+    # add sample identifier
+    mse.df.2[counter, 1] <- i
+    counter <- counter + 1
+  }
+  next
+}
+p_2 <- mse.df.2 %>%
+  #filter(mse.df.2$Mean_Squared_Error<1) %>%
+  ggplot( aes(Degree_of_Polynomial, Mean_Squared_Error, color=factor(sample)))+
+  geom_point() +
+  geom_line()+xlab("Degree_of_Polynomial") + ylab("Mean_Squared_Error")+
+  theme_bw()
+
+p_vs <- subplot(p_1,p_2)
+p_vs
+
+
+```
+
+### Validation Set Approach - Filter by MSE < 1 
+### With increased number variables the MSE value increases therefore filtering the MSE 
+```{r, fig.width= 10}
+# Plot- Single set
+p_1 <- mse.df %>%
+  filter(mse.df$Mean_Squared_Error<1) %>%
+  ggplot( aes(Degree_of_Polynomial, Mean_Squared_Error))+
+  geom_point() +
+  geom_line()+xlab("Degree_of_Polynomial") + ylab("Mean_Squared_Error")+
+  theme_bw()
+p_2 <- mse.df.2 %>%
+  filter(mse.df.2$Mean_Squared_Error<1) %>%
+  ggplot( aes(Degree_of_Polynomial, Mean_Squared_Error, color=factor(sample)))+
+  geom_point() +
+  geom_line()+xlab("Degree_of_Polynomial") + ylab("Mean_Squared_Error")+
+  theme_bw()
+
+p_vs1 <- subplot(p_1,p_2)
+p_vs1
+```
+### Model Chosen
+```{r}
+barcol = c("grey", "grey", "dark green", "grey", "grey", "grey", "grey", "grey", "grey", "grey")
+barplot(table(factor(apply(mse.df.2, 1, which.min), levels = 1:10)),
+        ylab = "Times Chosen", xlab = "Polynomial Degree", col = barcol, main = "Model Chosen vs Degree")
+```
+
+
+
+## LOOCV & K-FOLD CROSS VALIDATION APPROACH 
+
+
+```{r, fig.width= 10}
+mse.df.loocv <- tibble(  Degree_of_Polynomial = vector("integer", 10), 
+                         Mean_Squared_Error = vector("double", 10))
+counter <- 1
+
+trControl <- trainControl(method  = "LOOCV",
+                          number  = 10,
+                          seeds = set.seed(7212))
+
+
+for(j in 1:10) {
+  
+  formula_lm <- Formula::as.Formula(paste0("Outcome ~ Glucose + Pregnancies + Insulin +  poly(Pregnancies,degree =",paste(j),")+ BMI  + poly(BMI,degree =",paste(j),")+ Age + poly(Age,degree =",paste(j),")"))
+  # modeling    
+  loocv_lm_fit <- train( formula_lm,
+                         method     = "lm",
+                         trControl  = trControl,
+                         metric     = "RMSE",
+                         data       = diab_outliers)
+  
+  # add degree & mse values
+  mse.df.loocv[counter, 1] <- j
+  mse.df.loocv[counter, 2] <- loocv_lm_fit$results$RMSE
+  
+  counter <- counter + 1
+}
+
+p1 <- mse.df.loocv %>%
+  #filter(mse.df.loocv$Mean_Squared_Error<1) %>%
+  ggplot( aes(Degree_of_Polynomial, Mean_Squared_Error))+
+  geom_point() +
+  geom_line()+xlab("Degree_of_Polynomial") + ylab("Mean_Squared_Error")+
+  theme_bw()
+
+# K-fold CV
+mse.df.kfold <- tibble(sample = vector("integer", 100), 
+                       Degree_of_Polynomial = vector("integer", 100), 
+                       Mean_Squared_Error = vector("double", 100))
+counter <- 1
+
+trControl <- trainControl(method  = "cv",
+                          number  = 10,
+                          seeds = set.seed(7212))
+
+for(j in 1:10) {
+  
+  formula_lm <- Formula::as.Formula(paste0("Outcome ~ Glucose  + Pregnancies + Insulin + poly(Pregnancies,degree =",paste(j),")+ BMI  + poly(BMI,degree =",paste(j),")+ Age + poly(Age,degree =",paste(j),")"))
+  
+  # modeling    
+  loocv_lm_fit <- train( formula_lm,
+                         method     = "lm",
+                         trControl  = trControl,
+                         metric     = "RMSE",
+                         data       = diab_outliers)
+  
+  # add degree & mse values
+  mse.df.kfold[counter:(counter+9), 2] <- j
+  mse.df.kfold[counter:(counter+9), 3] <- loocv_lm_fit$resample$RMSE
+  
+  # add sample identifier
+  mse.df.kfold[counter:(counter+9), 1] <- loocv_lm_fit$resample$Resample
+  counter <- counter + 10
+}
+
+
+p2 <- mse.df.kfold %>%
+  #filter(mse.df.kfold$Mean_Squared_Error<1) %>%
+  ggplot( aes(Degree_of_Polynomial, Mean_Squared_Error, color=factor(sample)))+
+  geom_point() +
+  geom_line()+xlab("Degree_of_Polynomial") + ylab("Mean_Squared_Error")+
+  theme_bw()
+
+p_cv <- subplot(p1, p2)
+p_cv
+
+```
+
+
+
+
+### LOOCV & K-Fold Cross Validation - Filter by MSE < 1
+
+```{r, fig.width= 10}
+p1 <- mse.df.loocv %>%
+  filter(mse.df.loocv$Mean_Squared_Error<1) %>%
+  ggplot( aes(Degree_of_Polynomial, Mean_Squared_Error))+
+  geom_point() +
+  geom_line()+xlab("Degree_of_Polynomial") + ylab("Mean_Squared_Error")+
+  theme_bw()
+p2 <- mse.df.kfold %>%
+  filter(mse.df.kfold$Mean_Squared_Error<1) %>%
+  ggplot( aes(Degree_of_Polynomial, Mean_Squared_Error, color=factor(sample)))+
+  geom_point() +
+  geom_line()+xlab("Degree_of_Polynomial") + ylab("Mean_Squared_Error")+
+  theme_bw()
+
+p_cv1 <- subplot(p1, p2)
+p_cv1
+```
+### Model Chosen 
+```{r}
+barcol = c("grey", "grey", "dark green", "grey", "grey", "grey", "grey", "grey", "grey", "grey")
+barplot(table(factor(apply(mse.df.kfold, 1, which.min), levels = 1:10)),
+        ylab = "Times Chosen", xlab = "Polynomial Degree", col = barcol, main = "Model Chosen vs Degree")
+```
+## ERROR RATE : LOOCV 
+### Leave-One-Out Cross-Validation : To perform LOOCV for a given generalized linear model we simply:
+###  fit our model across the entire data set with glm
+###  feed the entire data set and our fitted model into cv.glm
+
+```{r}
+library(boot)
+# step 1: fit model
+glm.fit <- glm(loocv_lm_fit, data = diab_outliers)
+
+# setp 2: perform LOOCV across entire data set
+loocv.err <- cv.glm(diab_outliers, glm.fit)
+
+str(loocv.err)
+```
+
+### LOOCV ERROR 
+```{r}
+loocv.err$delta[1]
+```
+### LOOCV MSE 
+```{r}
+# create function that computes LOOCV MSE based on specified polynomial degree
+loocv_error <- function(x) {
+  glm.fit <- glm((loocv_lm_fit), data = diab_outliers)
+  cv.glm(diab_outliers, glm.fit)$delta[1]
+}
+
+# compute LOOCV MSE for polynomial degrees 1-5
+library(purrr)
+1:10 %>% map_dbl(loocv_error)
+
+```
+
+
+## ANOVA
+### Using ANOVA to compare the Degree 1, 2, 3,4, 5 to find the best fit model 
+```{r}
+fit_1 <- lm(Outcome ~ Glucose + Pregnancies + Insulin + BMI + Age , data = diab_removedup)
+fit_2 <- lm(Outcome ~ Glucose + Pregnancies + Insulin + poly(BMI,2) + poly(Age,2), data = diab_removedup)
+fit_3 <- lm(Outcome ~ Glucose + Pregnancies + Insulin + poly(BMI,3) + poly(Age,3), data = diab_removedup)
+fit_4 <- lm(Outcome ~ Glucose + Pregnancies + Insulin + poly(BMI,4) + poly(Age,4), data = diab_removedup)
+fit_5 <- lm(Outcome ~ Glucose + Pregnancies + Insulin + poly(BMI,5) + poly(Age,5), data = diab_removedup)
+print(anova(fit_1,fit_2,fit_3,fit_4,fit_5))
+
+```
+
+### The  p -value comparing the linear Model 1 to the quadratic Model 2 is essentially zero  , indicating that a linear fit is not sufficient. 
+
+### Similarly the  p -value comparing the quadratic Model 2 to the cubic Model 3 is very low (0.0004), so the quadratic fit is also insufficient. 
+
+### The  p -value comparing the cubic and degree-4 polynomials, Model 3 and Model 4, is approximately more than 0.05 while the degree-5 polynomial 
+
+### Model 5 seems unnecessary because its  p -value is 0.22. Hence, either a cubic or a quartic polynomial appear to provide a reasonable fit to the data, but lower- or higher-order models are not justified.
+
